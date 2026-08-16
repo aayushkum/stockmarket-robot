@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stockmarket-robot"
+version = "0.1.0"
+description = "Explainable S&P 500 research and paper-trading robot"
+requires-python = ">=3.11,<3.14"
+dependencies = ["yfinance>=0.2.66", "pandas>=2.2", "numpy>=2.0", "flask>=3.1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+stockmarket = "stockmarket.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
