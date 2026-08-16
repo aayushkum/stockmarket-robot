@@ -14,7 +14,17 @@ The basic idea is an algorithm that, through publically avalible financial data,
 - Paper portfolio engine
 - Historical backtesting
 
-> Research/paper trading only. No live-money order execution.
+## Architecture
+
+The project is split into a few main parts:
+
+- `data/` - gets and stores market data
+- `valuation/` - calculates fair-value estimates
+- `scoring/` - combines the different signals
+- `portfolio/` - manages the paper portfolio
+- `backtesting/` - tests strategies against historical data
+- `dashboard/` - displays results
+- `database/` - handles persistent data
 
 ## Project Status
 This is still very much a work in progress. The current version is the foundation of the project. There are a lot of things I still want to improve, especially the valuation models. 
