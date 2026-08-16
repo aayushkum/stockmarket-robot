@@ -17,7 +17,7 @@ The basic idea is an algorithm that, through publically avalible financial data,
 > Research/paper trading only. No live-money order execution.
 
 ## Project Status
-This is still very much a work in progress. The current version is the foundation of the project. There are a lot of things I still want to improve, especially the valuation models. \
+This is still very much a work in progress. The current version is the foundation of the project. There are a lot of things I still want to improve, especially the valuation models. 
 
 ## Windows setup
 ```powershell
