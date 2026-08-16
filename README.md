@@ -1,6 +1,6 @@
 # StockMarket Robot
 
-Explainable S&P 500 research, valuation, backtesting, and paper-trading system designed for an 8 GB Windows laptop.
+Explainable S&P 500 research, valuation, backtesting, and paper-trading system. 
 
 ## Features
 - yfinance market/fundamental data
