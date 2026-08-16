@@ -9,12 +9,12 @@ Before a final trade is made, it goes through a risk-management algorithm that i
 
 ## Features
 - yfinance market/fundamental data
-- SQLite persistence
-- Multiple valuation models with arithmetic-mean fair value
-- Explainable 0–100 master score
+- SQLite 
+- Multiple valuation models 
+- 0–100 master score
 - BUY / HOLD / SELL signals
 - Paper portfolio engine
-- Historical backtesting
+- Historical backtesting (Coming Soon)
 
 ## Architecture
 
