@@ -33,6 +33,23 @@ The project is split into a few main parts:
 ## Project Status
 This is still very much a work in progress. The current version is the foundation of the project. There are a lot of things I still want to improve, especially the valuation models. 
 
+## Timeline
+#### July 2026: Research and Planning
+- Sparked by the $15 billion loss from Jane Street Situational Awareness, began researching the architecture of stock trading bots.
+- Analyzed the mechanics behind major trading algorithms across quantitative finance industries.
+- Designed a high-level system architecture, creating the fundamentals for what would become my trading bot.
+
+#### July 28th - August 15th 2026: Local Development
+- Initiated bot development locally using Python and VS Code.
+- Built out core features, focusing on valuation models and integration of key components.
+- Mastered yfinance and related topics to optimize the bot.
+
+#### August 15th 2026 - Present: GitHub Integration & Optimization
+- Transitioned the repository to GitHub to manage version control and deployment.
+- Standardized regular commit workflows and refactored core modules to support continuous scaling.
+- Planning for a future release, that will allow users to paper-trade and backtest the bot to calculate success rate.
+
+
 ## Windows setup
 ```powershell
 py -3.11 -m venv .venv
