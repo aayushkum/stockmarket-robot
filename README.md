@@ -1,6 +1,6 @@
 # StockMarket Robot
 
-This is a personal project I've been working on, essentially creating a stock-trading robot that attempts to systematically identify  mispriced stocks within the S&P 500, and exploit those misprices. The project has been inspired by the prevalance of trading bots in the modern stock market, and the hypothesis that a company's underlying financial performance should, over a sufficiently long period, be reflected in its market valuation.
+This is a personal project I've been working on, essentially creating a stock-trading robot that attempts to systematically identify  mispriced stocks within the S&P 500, and exploit those misprices. The project has been inspired by the prevalance of trading bots in the modern stock market, and the hypothesis that a company's underlying financial performance should, over a sufficiently long period, be reflected in its market valuation. It's a mix of computer science and economic principles, built by stock analysis methods used across the industry.
 
 ## Summary
 
