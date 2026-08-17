@@ -53,9 +53,9 @@ def valuation_score(upside):
 def quality_score(snapshot):
     scores = []
 
-    if snapshot.roe is not None:
+    if snapshot.return_on_equity is not None:
         try:
-            roe = float(snapshot.roe)
+            roe = float(snapshot.return_on_equity)
             if math.isfinite(roe):
                 scores.append(clamp(50.0 + roe * 100.0))
         except (TypeError, ValueError):
