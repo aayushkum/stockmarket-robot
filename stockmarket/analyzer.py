@@ -1,4 +1,5 @@
 """Main analysis pipeline combining all valuation and scoring models."""
+
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -15,22 +16,30 @@ def analyze_snapshot(
     analyzed_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     # Analyze a point-in-time snapshot using only price history available then.
-    if not isinstance(snapshot, Snapshot):
-        raise TypeError("snapshot must be a Snapshot")
+
+    if snapshot is None:
+        raise TypeError("snapshot cannot be None")
 
     if not isinstance(history, pd.Series):
         raise TypeError("history must be a pandas Series")
 
+    history = pd.to_numeric(
+        history,
+        errors="coerce",
+    ).dropna()
+
     if history.empty:
-        raise ValueError("history cannot be empty")
+        raise ValueError(
+            "history contains no valid prices"
+        )
 
-    history = pd.to_numeric(history, errors="coerce").dropna()
+    valuation: ValuationSummary = summarize(
+        snapshot
+    )
 
-    if history.empty:
-        raise ValueError("history contains no valid prices")
-
-    valuation: ValuationSummary = summarize(snapshot)
-    momentum = momentum_score(history)
+    momentum = momentum_score(
+        history
+    )
 
     score, components = master_score(
         snapshot,
@@ -38,7 +47,10 @@ def analyze_snapshot(
         momentum,
     )
 
-    timestamp = analyzed_at or datetime.now(timezone.utc)
+    timestamp = (
+        analyzed_at
+        or datetime.now(timezone.utc)
+    )
 
     return {
         "ticker": snapshot.ticker,
@@ -55,10 +67,18 @@ def analyze_snapshot(
     }
 
 
-def analyze(ticker: str) -> Dict[str, Any]:
-    """Perform a live analysis using the latest available data."""
-    snapshot = fetch_snapshot(ticker)
-    history = price_history(ticker, "1y")
+def analyze(
+    ticker: str,
+) -> Dict[str, Any]:
+
+    snapshot = fetch_snapshot(
+        ticker
+    )
+
+    history = price_history(
+        ticker,
+        "1y",
+    )
 
     return analyze_snapshot(
         snapshot,
