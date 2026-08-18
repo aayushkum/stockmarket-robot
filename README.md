@@ -11,10 +11,10 @@ This is a personal project I've been working on, essentially creating a stock-tr
 2. **Fair Value Estimation**: Calculates fair value using 5 independent models (DCF, earnings multiple, revenue multiple, FCF multiple, historical P/E) and takes the average
 3. **Composite Scoring**: Grades each stock 0-100 based on 5 components:
    - **Valuation** (30%): Is it cheap relative to fair value?
-   - **Growth** (20%): Are revenues/earnings increasing?
-   - **Quality** (20%): Profitable with strong margins and ROE?
-   - **Momentum** (15%): Is price trending up?
-   - **Risk** (15%): Low debt, stable, reasonable volatility?
+   - **Growth** (20%): Are revenues/earnings increasing (and by how much)?
+   - **Quality** (20%): Is it profitable, with strong margins and ROE?
+   - **Momentum** (15%): Is price trending up or down in the near past?
+   - **Risk** (15%): Low debt, stock stability, reasonable volatility?
 4. **Trading Signals**: Generates BUY (≥70), HOLD (40-69), or SELL (≤40) recommendations
 5. **Paper Trading**: Simulates buy/sell execution with position tracking and equity calculation
 6. **Risk Management**: Enforces portfolio constraints (position limits, max daily trades, etc.) to prevent rash decisions
