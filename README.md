@@ -4,7 +4,7 @@ This is a personal project I've been working on, essentially creating a stock-tr
 
 ## Summary
 
-**Core Mission**: Identify potentially undervalued stocks in the S&P 500 by comparing estimated fair values to current market prices.
+**Core Mission**: Identify overvalued and undervalued stocks in the S&P 500 by comparing estimated fair values to current market prices, then acting upon it by selling or buying said stock.
 
 **How It Works**:
 1. **Data Collection**: Fetches 19 financial metrics per stock (price, earnings, revenue, cash flow, margins, volatility, etc.) from yfinance
@@ -19,7 +19,7 @@ This is a personal project I've been working on, essentially creating a stock-tr
 5. **Paper Trading**: Simulates buy/sell execution with position tracking and equity calculation
 6. **Risk Management**: Enforces portfolio constraints (position limits, max daily trades, etc.) to prevent rash decisions
 
-**Current State**: Paper trading only (no real cash). Built as a learning project focused on systematic stock analysis. Fully tested (112/112 tests passing) and production-ready for autonomous scanning of all 500 S&P constituents.
+**Current State**: Paper trading only. Built as a learning project focused on systematic stock analysis.
 
 
 ## Features
@@ -36,7 +36,7 @@ This is a personal project I've been working on, essentially creating a stock-tr
 
 ## Architecture
 
-The project uses a modular, layered architecture:
+The project uses the following modular architecture:
 
 ### Core Modules
 - **`data.py`** - yfinance integration with `Snapshot` dataclass (19 financial metrics)
@@ -68,10 +68,10 @@ yfinance → fetch_snapshot() → analyzer → [valuation, scoring, momentum]
   - `test_valuation.py` (1 test) - Valuation models
 
 ## Project Status
-While this is still a work in progress, major parts have already been completed throughout. As I create the baseline for stock analysis to work, I have also created, and passed 112 tests to ensure everything is functioning smoothly, and am preparing to analyze data arising from it.
+While this is still a work in progress, major parts have already been completed throughout, including stock analysis, tests for the code, and connection to real-time markets.
 
 Current focus areas for improvement:
-- Real trading integration (paper trading only currently)
+- Analyzing how well the bot performs
 - Performance optimization for large-scale scanning
 - Additional technical indicators and signals
 
