@@ -15,7 +15,6 @@ def analyze_snapshot(
     history: pd.Series,
     analyzed_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    # Analyze a point-in-time snapshot using only price history available then.
 
     if snapshot is None:
         raise TypeError("snapshot cannot be None")
@@ -70,6 +69,7 @@ def analyze_snapshot(
 def analyze(
     ticker: str,
 ) -> Dict[str, Any]:
+    """Perform a live analysis using the latest available data."""
 
     snapshot = fetch_snapshot(
         ticker
@@ -80,7 +80,10 @@ def analyze(
         "1y",
     )
 
-    return analyze_snapshot(
+    result = analyze_snapshot(
         snapshot,
         history["Close"],
     )
+    result["ticker"] = ticker
+
+    return result
