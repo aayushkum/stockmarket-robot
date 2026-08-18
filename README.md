@@ -162,4 +162,4 @@ $env:DASHBOARD_PORT = "5000"
 python -m stockmarket
 ```
 
-All settings have sensible defaults and are optional.
+All settings have defaults created for a reasonable environment, and are optional, they may be changed by the user to fit specifications.
