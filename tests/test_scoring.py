@@ -16,33 +16,26 @@ from stockmarket.scoring import (
 
 
 def make_snapshot(**overrides):
+    """Create a test Snapshot with sensible defaults matching the actual Snapshot dataclass."""
     values = {
         "ticker": "TEST",
         "price": 100.0,
-
         "eps": 5.0,
         "forward_eps": 5.5,
-        "free_cash_flow_per_share": 4.0,
-
         "revenue": 100_000_000_000.0,
         "free_cash_flow": 4_000_000_000.0,
         "shares": 1_000_000_000.0,
-        "market_cap": 100_000_000_000.0,
-
         "beta": 1.0,
         "pe": 20.0,
         "forward_pe": 18.18,
-
         "profit_margin": 0.20,
         "operating_margin": 0.25,
         "return_on_equity": 0.25,
-
         "revenue_growth": 0.10,
         "earnings_growth": 0.10,
-
         "debt_to_equity": 50.0,
         "current_ratio": 1.5,
-
+        "market_cap": 100_000_000_000.0,
         "sector": "Technology",
     }
 
@@ -91,42 +84,42 @@ def test_clamp_handles_infinity():
 
 
 def test_valuation_score_is_neutral_at_zero_upside():
-    score = valuation_score(0.0)
+    score = valuation_score(FakeValuation(0.0))
 
     assert score == pytest.approx(50.0)
 
 
 def test_positive_upside_improves_score():
-    neutral = valuation_score(0.0)
-    positive = valuation_score(0.20)
+    neutral = valuation_score(FakeValuation(0.0))
+    positive = valuation_score(FakeValuation(0.20))
 
     assert positive > neutral
 
 
 def test_negative_upside_reduces_score():
-    neutral = valuation_score(0.0)
-    negative = valuation_score(-0.20)
+    neutral = valuation_score(FakeValuation(0.0))
+    negative = valuation_score(FakeValuation(-0.20))
 
     assert negative < neutral
 
 
 def test_valuation_score_is_bounded():
     for upside in [-10, -1, -0.5, 0, 0.5, 1, 10]:
-        score = valuation_score(upside)
+        score = valuation_score(FakeValuation(upside))
 
         assert 0 <= score <= 100
 
 
 def test_extreme_upside_does_not_exceed_100():
-    assert valuation_score(10.0) == 100
+    assert valuation_score(FakeValuation(10.0)) == 100
 
 
 def test_extreme_downside_does_not_go_below_zero():
-    assert valuation_score(-10.0) == 0
+    assert valuation_score(FakeValuation(-10.0)) == 0
 
 
 def test_missing_upside_is_neutral():
-    assert valuation_score(None) == 50
+    assert valuation_score(FakeValuation(None)) == 50
 
 
 # ============================================================
@@ -456,9 +449,11 @@ def test_signal_buy_threshold():
 
 
 def test_signal_hold_range():
+    # HOLD range is between BUY threshold (>=70) and SELL threshold (<=40)
+    # So valid HOLD range is (40, 70)
     assert signal(40.01) == "HOLD"
     assert signal(50) == "HOLD"
-    assert signal(74.99) == "HOLD"
+    assert signal(69.99) == "HOLD"
 
 
 def test_signal_sell_threshold():
@@ -467,9 +462,11 @@ def test_signal_sell_threshold():
 
 
 def test_signal_boundaries_are_deterministic():
-    assert signal(75) == "BUY"
-    assert signal(74.999) == "HOLD"
+    # BUY threshold is >= 70
+    assert signal(70) == "BUY"
+    assert signal(69.999) == "HOLD"
 
+    # SELL threshold is <= 40
     assert signal(40) == "SELL"
     assert signal(40.001) == "HOLD"
 

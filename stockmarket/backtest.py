@@ -1,151 +1,76 @@
-import math
-
+"""Historical backtest of moving average strategy."""
+from typing import Dict, Any
 import numpy as np
-import pandas as pd
 import yfinance as yf
 
 
-def _annualized_return(equity_curve):
-    if len(equity_curve) < 2:
-        return 0.0
-
-    start = float(equity_curve.iloc[0])
-    end = float(equity_curve.iloc[-1])
-
-    if start <= 0 or end <= 0:
-        return 0.0
-
-    days = (equity_curve.index[-1] - equity_curve.index[0]).days
-
-    if days <= 0:
-        return 0.0
-
-    years = days / 365.25
-
-    return (end / start) ** (1.0 / years) - 1.0
-
-
-def _max_drawdown(equity_curve):
-    if equity_curve.empty:
-        return 0.0
-
-    running_max = equity_curve.cummax()
-    drawdown = equity_curve / running_max - 1.0
-
-    return float(drawdown.min())
-
-
-def _sharpe_ratio(equity_curve):
-    returns = equity_curve.pct_change().dropna()
-
-    if len(returns) < 2:
-        return 0.0
-
-    volatility = returns.std()
-
-    if volatility == 0 or not math.isfinite(volatility):
-        return 0.0
-
-    return float(
-        np.sqrt(252.0)
-        * returns.mean()
-        / volatility
-    )
-
-
-def moving_average_backtest(
-    ticker,
-    period="5y",
-    starting_cash=100_000.0,
-):
-    """
-    Simple moving-average crossover benchmark.
-
-    IMPORTANT:
-    This is a benchmark strategy, NOT a backtest of the full
-    StockMarket Robot valuation model.
-
+def moving_average_backtest(ticker: str, period: str = "5y") -> Dict[str, Any]:
+    """Backtest a simple 50/200 moving average crossover strategy.
+    
     Strategy:
-        BUY when 50-day MA > 200-day MA.
-        HOLD while the condition remains true.
-        Otherwise stay in cash.
-
-    Signals are shifted by one trading day so that today's closing
-    price cannot be used to pretend we traded at that same close.
+    - BUY: 50-day MA > 200-day MA
+    - SELL: 50-day MA < 200-day MA
+    
+    Args:
+        ticker: Stock ticker to backtest.
+        period: Historical period (e.g., '5y', '1y', 'max').
+        
+    Returns:
+        Dictionary with backtest results:
+        - strategy_return: Total return of strategy
+        - benchmark_return: Total return of buy-and-hold
+        - cagr: Compound annual growth rate
+        - max_drawdown: Maximum drawdown
+        - sharpe: Sharpe ratio
+        - observations: Number of trading days
+        
+    Raises:
+        ValueError: If no historical data available.
     """
-
-    ticker_obj = yf.Ticker(ticker)
-
-    df = ticker_obj.history(
-        period=period,
-        auto_adjust=True,
-    )
-
+    try:
+        df = yf.Ticker(ticker).history(period=period, auto_adjust=True)
+    except Exception as e:
+        raise ValueError(f"Failed to fetch backtest data for {ticker}: {e}")
+    
     if df.empty:
-        raise ValueError(
-            f"No historical data available for {ticker}"
-        )
-
-    if "Close" not in df.columns:
-        raise ValueError(
-            f"Historical data for {ticker} has no Close column"
-        )
-
-    close = df["Close"].dropna().astype(float)
-
-    if len(close) < 210:
-        raise ValueError(
-            f"Not enough historical data for {ticker}; "
-            f"need at least 210 trading days."
-        )
-
+        raise ValueError(f"No history available for {ticker} in period {period}")
+    
+    close = df["Close"].dropna()
+    
+    if len(close) < 200:
+        raise ValueError(f"Insufficient data for backtest (need 200+ days, got {len(close)})")
+    
+    # Calculate moving averages
     ma50 = close.rolling(50).mean()
     ma200 = close.rolling(200).mean()
-
-    # The raw strategy signal is based on the closing price.
-    raw_signal = (ma50 > ma200).astype(float)
-
-    # Shift the signal one trading day.
-    #
-    # This prevents the backtest from seeing today's close and then
-    # magically buying at today's close.
-    position = raw_signal.shift(1).fillna(0.0)
-
-    daily_returns = close.pct_change().fillna(0.0)
-
-    strategy_returns = position * daily_returns
-
-    equity_curve = (
-        starting_cash
-        * (1.0 + strategy_returns).cumprod()
-    )
-
-    benchmark_curve = (
-        starting_cash
-        * (1.0 + daily_returns).cumprod()
-    )
-
-    cagr = _annualized_return(equity_curve)
-    max_drawdown = _max_drawdown(equity_curve)
-    sharpe = _sharpe_ratio(equity_curve)
-
-    benchmark_cagr = _annualized_return(benchmark_curve)
-    benchmark_drawdown = _max_drawdown(benchmark_curve)
-
+    
+    # Generate signals (1 = long, 0 = cash)
+    signal = (ma50 > ma200).astype(int).shift(1).fillna(0)
+    
+    # Calculate daily returns
+    daily_returns = close.pct_change().fillna(0)
+    
+    # Strategy returns (only when signal is 1)
+    strategy_returns = signal * daily_returns
+    
+    # Cumulative returns
+    strategy_equity = (1 + strategy_returns).cumprod()
+    benchmark_equity = (1 + daily_returns).cumprod()
+    
+    # Performance metrics
+    years = max((close.index[-1] - close.index[0]).days / 365.25, 1 / 365.25)
+    cagr = strategy_equity.iloc[-1] ** (1 / years) - 1
+    max_drawdown = (strategy_equity / strategy_equity.cummax() - 1).min()
+    volatility = strategy_returns.std() * np.sqrt(252)
+    sharpe = (strategy_returns.mean() * 252 / volatility) if volatility > 0 else 0
+    
     return {
         "ticker": ticker,
-        "strategy": "50/200 moving-average crossover",
         "period": period,
-        "starting_cash": float(starting_cash),
-        "ending_value": float(equity_curve.iloc[-1]),
+        "strategy_return": float(strategy_equity.iloc[-1] - 1),
+        "benchmark_return": float(benchmark_equity.iloc[-1] - 1),
         "cagr": float(cagr),
         "max_drawdown": float(max_drawdown),
         "sharpe": float(sharpe),
-        "buy_and_hold_ending_value": float(
-            benchmark_curve.iloc[-1]
-        ),
-        "buy_and_hold_cagr": float(benchmark_cagr),
-        "buy_and_hold_max_drawdown": float(
-            benchmark_drawdown
-        ),
+        "observations": int(len(close))
     }

@@ -1,497 +1,218 @@
+"""Valuation models for stock fair value estimation."""
 from dataclasses import dataclass, asdict
 import math
+from typing import Optional, List
 
 from .data import Snapshot
 
 
 @dataclass
 class ValuationResult:
+    """Result of a single valuation model.
+    
+    Attributes:
+        model: Name of the valuation model.
+        fair_value: Estimated fair value per share, or None if unavailable.
+        note: Human-readable explanation of the calculation.
+    """
     model: str
-    fair_value: float | None
+    fair_value: Optional[float]
     note: str
-
-    def to_dict(self):
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
         return asdict(self)
 
 
 @dataclass
 class ValuationSummary:
-    estimates: list[ValuationResult]
-    fair_value: float | None
-    upside: float | None
-    low_value: float | None
-    high_value: float | None
-
-    def to_dict(self):
+    """Summary of all valuation estimates.
+    
+    Attributes:
+        estimates: List of individual model results.
+        fair_value: Arithmetic mean of valid estimates, or None if all invalid.
+        upside: Potential upside as (fair_value / current_price - 1), or None.
+    """
+    estimates: List[ValuationResult]
+    fair_value: Optional[float]
+    upside: Optional[float]
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary with nested estimate dicts."""
         return {
-            "estimates": [e.to_dict() for e in self.estimates],
+            "estimates": [x.to_dict() for x in self.estimates],
             "fair_value": self.fair_value,
-            "upside": self.upside,
-            "low_value": self.low_value,
-            "high_value": self.high_value,
+            "upside": self.upside
         }
 
 
-def _safe_positive(value):
-    if value is None:
-        return None
-
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return None
-
-    if not math.isfinite(value) or value <= 0:
-        return None
-
-    return value
-
-
-def _safe_growth(value, default=None):
+def earnings_multiple(snapshot: Snapshot) -> ValuationResult:
+    """Estimate fair value using forward earnings and normalized P/E ratio.
+    
+    Uses forward EPS and adjusts P/E based on earnings growth.
+    
+    Args:
+        snapshot: Financial snapshot data.
+        
+    Returns:
+        ValuationResult with fair value or error message.
     """
-    Convert growth to a usable finite number.
+    if not snapshot.forward_eps or snapshot.forward_eps <= 0:
+        return ValuationResult(
+            "earnings_multiple",
+            None,
+            "Forward EPS unavailable/non-positive"
+        )
+    
+    growth = snapshot.earnings_growth or 0.05
+    pe = min(25, max(10, 15 + growth * 100 * 0.35))
+    fair_value = snapshot.forward_eps * pe
+    return ValuationResult(
+        "earnings_multiple",
+        fair_value,
+        f"Forward EPS x normalized P/E {pe:.1f}"
+    )
+
+
+def revenue_multiple(snapshot: Snapshot) -> ValuationResult:
+    """Estimate fair value using revenue per share and P/S ratio.
+    
+    Args:
+        snapshot: Financial snapshot data.
+        
+    Returns:
+        ValuationResult with fair value or error message.
     """
-
-    if value is None:
-        return default
-
-    try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return default
-
-    if not math.isfinite(value):
-        return default
-
-    return value
-
-
-def _clamp(value, low, high):
-    return max(low, min(high, value))
-
-
-def dcf_value(
-    fcf_per_share,
-    growth,
-    discount_rate=0.09,
-    terminal_growth=0.025,
-    years=5,
-):
-
-    fcf_per_share = _safe_positive(fcf_per_share)
-
-    if fcf_per_share is None:
-        return None
-
-    growth = _safe_growth(growth, 0.0)
-
-    # Limit near-term growth to a reasonable range.
-    growth = _clamp(growth, -0.05, 0.10)
-
-    # Keep discount rates conservative.
-    discount_rate = _clamp(
-        float(discount_rate),
-        0.08,
-        0.15,
-    )
-
-    terminal_growth = _clamp(
-        float(terminal_growth),
-        0.00,
-        0.03,
-    )
-
-    # Gordon Growth requires r > g.
-    if terminal_growth >= discount_rate:
-        terminal_growth = discount_rate - 0.01
-
-    value = 0.0
-
-    for year in range(1, years + 1):
-
-        projected_fcf_per_share = (
-            fcf_per_share
-            * ((1.0 + growth) ** year)
+    if (not snapshot.revenue or not snapshot.shares or
+            snapshot.revenue <= 0 or snapshot.shares <= 0):
+        return ValuationResult(
+            "revenue_multiple",
+            None,
+            "Revenue/shares unavailable"
         )
+    
+    growth = snapshot.revenue_growth or 0.05
+    price_to_sales = min(8, max(0.8, 2 + growth * 100 * 0.06))
+    fair_value = (snapshot.revenue / snapshot.shares) * price_to_sales
+    return ValuationResult(
+        "revenue_multiple",
+        fair_value,
+        f"Revenue/share x P/S {price_to_sales:.2f}"
+    )
 
-        discounted_fcf = (
-            projected_fcf_per_share
-            / ((1.0 + discount_rate) ** year)
+
+def fcf_multiple(snapshot: Snapshot) -> ValuationResult:
+    """Estimate fair value using free cash flow per share.
+    
+    Args:
+        snapshot: Financial snapshot data.
+        
+    Returns:
+        ValuationResult with fair value or error message.
+    """
+    if (not snapshot.free_cash_flow or not snapshot.shares or
+            snapshot.free_cash_flow <= 0 or snapshot.shares <= 0):
+        return ValuationResult(
+            "fcf_multiple",
+            None,
+            "FCF/shares unavailable"
         )
-
-        value += discounted_fcf
-
-    terminal_fcf_per_share = (
-        fcf_per_share
-        * ((1.0 + growth) ** years)
+    
+    growth = snapshot.earnings_growth or snapshot.revenue_growth or 0.05
+    multiple = min(30, max(10, 18 + growth * 100 * 0.4))
+    fair_value = (snapshot.free_cash_flow / snapshot.shares) * multiple
+    return ValuationResult(
+        "fcf_multiple",
+        fair_value,
+        f"FCF/share x multiple {multiple:.1f}"
     )
 
-    terminal_value_per_share = (
-        terminal_fcf_per_share
-        * (1.0 + terminal_growth)
-        / (discount_rate - terminal_growth)
+
+def historical_pe(snapshot: Snapshot) -> ValuationResult:
+    """Estimate fair value using trailing EPS and normalized P/E of 18.
+    
+    Args:
+        snapshot: Financial snapshot data.
+        
+    Returns:
+        ValuationResult with fair value or error message.
+    """
+    if not snapshot.eps or snapshot.eps <= 0:
+        return ValuationResult(
+            "historical_pe",
+            None,
+            "EPS unavailable/non-positive"
+        )
+    
+    return ValuationResult(
+        "historical_pe",
+        snapshot.eps * 18,
+        "Normalized long-run P/E proxy of 18"
     )
 
-    discounted_terminal_value = (
-        terminal_value_per_share
-        / ((1.0 + discount_rate) ** years)
+
+def dcf_proxy(snapshot: Snapshot) -> ValuationResult:
+    """Estimate fair value using 5-year discounted cash flow model.
+    
+    Calculates present value of projected FCF over 5 years plus terminal value.
+    
+    Args:
+        snapshot: Financial snapshot data.
+        
+    Returns:
+        ValuationResult with fair value or error message.
+    """
+    if (not snapshot.free_cash_flow or not snapshot.shares or
+            snapshot.free_cash_flow <= 0 or snapshot.shares <= 0):
+        return ValuationResult(
+            "dcf",
+            None,
+            "FCF/shares unavailable"
+        )
+    
+    fcf_per_share = snapshot.free_cash_flow / snapshot.shares
+    growth = min(0.10, max(0.02, snapshot.revenue_growth or
+                                 snapshot.earnings_growth or 0.05))
+    discount_rate = 0.09 + max(0, (snapshot.beta or 1) - 1) * 0.02
+    terminal_growth = min(0.035, growth)
+    
+    # Project FCF over 5 years and discount to present
+    value = 0
+    for year in range(1, 6):
+        fcf_per_share *= (1 + growth)
+        value += fcf_per_share / ((1 + discount_rate) ** year)
+    
+    # Add terminal value
+    terminal_value = (fcf_per_share * (1 + terminal_growth) /
+                     max(0.02, discount_rate - terminal_growth))
+    value += terminal_value / ((1 + discount_rate) ** 5)
+    
+    return ValuationResult(
+        "dcf",
+        value,
+        f"5-year DCF proxy; growth {growth:.1%}, discount {discount_rate:.1%}"
     )
-
-    value += discounted_terminal_value
-
-    return value
 
 
 def summarize(snapshot: Snapshot) -> ValuationSummary:
+    """Summarize valuation using all models and calculate arithmetic mean.
+    
+    Args:
+        snapshot: Financial snapshot data.
+        
+    Returns:
+        ValuationSummary with all model estimates and mean fair value.
     """
-    Calculate several per-share valuation estimates.
-
-    Model hierarchy:
-
-        DCF
-         ↓
-        Primary intrinsic-value estimate
-
-        EPS × P/E
-        FCF/share × multiple
-        Historical EPS × multiple
-         ↓
-        Secondary sanity checks
-    """
-
-    estimates = []
-
-    price = _safe_positive(snapshot.price)
-
-    # ============================================================
-    # 1. DCF — PRIMARY MODEL
-    # ============================================================
-
-    fcf_per_share = _safe_positive(
-        snapshot.free_cash_flow_per_share
-    )
-
-    growth = _safe_growth(
-        snapshot.earnings_growth,
-        _safe_growth(
-            snapshot.revenue_growth,
-            0.0,
-        ),
-    )
-
-    dcf = None
-
-    if fcf_per_share is not None:
-
-        beta = _safe_positive(snapshot.beta)
-
-        if beta is None:
-            beta = 1.0
-        discount_rate = (
-            0.09
-            + max(0.0, beta - 1.0) * 0.02
-        )
-
-        discount_rate = _clamp(
-            discount_rate,
-            0.08,
-            0.14,
-        )
-
-        dcf = dcf_value(
-            fcf_per_share=fcf_per_share,
-            growth=growth,
-            discount_rate=discount_rate,
-            terminal_growth=0.025,
-            years=5,
-        )
-
-        if dcf is not None:
-
-            estimates.append(
-                ValuationResult(
-                    model="DCF",
-                    fair_value=dcf,
-                    note=(
-                        "Primary intrinsic-value estimate; "
-                        f"FCF/share=${fcf_per_share:.2f}, "
-                        f"growth={growth:.1%}, "
-                        f"discount_rate={discount_rate:.1%}"
-                    ),
-                )
-            )
-
-    else:
-
-        estimates.append(
-            ValuationResult(
-                model="DCF",
-                fair_value=None,
-                note=(
-                    "Unavailable: positive "
-                    "FCF/share could not be calculated."
-                ),
-            )
-        )
-
-    # ============================================================
-    # 2. FORWARD EPS × P/E
-    # ============================================================
-
-    forward_eps = _safe_positive(
-        snapshot.forward_eps
-    )
-
-    eps_value = None
-
-    if forward_eps is not None:
-
-        growth_for_multiple = _safe_growth(
-            growth,
-            0.0,
-        )
-        pe = (
-            15.0
-            + _clamp(
-                growth_for_multiple,
-                -0.10,
-                0.20,
-            ) * 25.0
-        )
-
-        pe = _clamp(
-            pe,
-            10.0,
-            22.0,
-        )
-
-        eps_value = forward_eps * pe
-
-        estimates.append(
-            ValuationResult(
-                model="Forward EPS × P/E",
-                fair_value=eps_value,
-                note=(
-                    "Secondary relative-valuation check; "
-                    f"forward EPS=${forward_eps:.2f}, "
-                    f"P/E={pe:.1f}"
-                ),
-            )
-        )
-
-    else:
-
-        estimates.append(
-            ValuationResult(
-                model="Forward EPS × P/E",
-                fair_value=None,
-                note=(
-                    "Unavailable: no positive "
-                    "forward EPS."
-                ),
-            )
-        )
-
-    # ============================================================
-    # 3. FCF/SHARE × MULTIPLE
-    # ============================================================
-
-    fcf_multiple_value = None
-
-    if fcf_per_share is not None:
-
-        fcf_growth = _safe_growth(
-            growth,
-            0.0,
-        )
-
-        fcf_multiple = (
-            15.0
-            + _clamp(
-                fcf_growth,
-                -0.10,
-                0.20,
-            ) * 20.0
-        )
-
-        fcf_multiple = _clamp(
-            fcf_multiple,
-            8.0,
-            20.0,
-        )
-
-        fcf_multiple_value = (
-            fcf_per_share
-            * fcf_multiple
-        )
-
-        estimates.append(
-            ValuationResult(
-                model="FCF/share × Multiple",
-                fair_value=fcf_multiple_value,
-                note=(
-                    "Secondary cash-flow multiple check; "
-                    f"FCF/share=${fcf_per_share:.2f}, "
-                    f"multiple={fcf_multiple:.1f}"
-                ),
-            )
-        )
-
-    else:
-
-        estimates.append(
-            ValuationResult(
-                model="FCF/share × Multiple",
-                fair_value=None,
-                note=(
-                    "Unavailable: no positive "
-                    "FCF/share."
-                ),
-            )
-        )
-
-    # ============================================================
-    # 4. HISTORICAL EPS × 18
-    # ============================================================
-
-    eps = _safe_positive(
-        snapshot.eps
-    )
-
-    historical_value = None
-
-    if eps is not None:
-
-        historical_value = eps * 18.0
-
-        estimates.append(
-            ValuationResult(
-                model="Historical EPS × 18",
-                fair_value=historical_value,
-                note=(
-                    "Secondary historical-multiple "
-                    f"check; EPS=${eps:.2f}, P/E=18"
-                ),
-            )
-        )
-
-    else:
-
-        estimates.append(
-            ValuationResult(
-                model="Historical EPS × 18",
-                fair_value=None,
-                note=(
-                    "Unavailable: no positive EPS."
-                ),
-            )
-        )
-
-    # ============================================================
-    # FINAL VALUE
-    # ============================================================
-
-    valid_estimates = [
-        estimate
-        for estimate in estimates
-        if estimate.fair_value is not None
-        and math.isfinite(estimate.fair_value)
-        and estimate.fair_value > 0
-    ]
-
+    models = [dcf_proxy, earnings_multiple, fcf_multiple, revenue_multiple, historical_pe]
+    estimates = [model(snapshot) for model in models]
+    
+    # Filter to valid, finite, positive values only
     valid_values = [
-        estimate.fair_value
-        for estimate in valid_estimates
+        x.fair_value for x in estimates
+        if x.fair_value is not None and math.isfinite(x.fair_value) and x.fair_value > 0
     ]
-
-    if not valid_values:
-
-        return ValuationSummary(
-            estimates=estimates,
-            fair_value=None,
-            upside=None,
-            low_value=None,
-            high_value=None,
-        )
-
-    # ------------------------------------------------------------
-    # VALUATION RANGE
-    # ------------------------------------------------------------
-
-    low_value = min(valid_values)
-    high_value = max(valid_values)
-
-    # ------------------------------------------------------------
-    # FINAL FAIR VALUE
-    # ------------------------------------------------------------
-
-    if dcf is not None:
-
-        secondary_values = [
-            estimate.fair_value
-            for estimate in valid_estimates
-            if estimate.model != "DCF"
-        ]
-
-        if secondary_values:
-
-            sorted_secondary = sorted(
-                secondary_values
-            )
-
-            middle = len(sorted_secondary) // 2
-
-            if len(sorted_secondary) % 2 == 0:
-                secondary_median = (
-                    sorted_secondary[middle - 1]
-                    + sorted_secondary[middle]
-                ) / 2.0
-            else:
-                secondary_median = (
-                    sorted_secondary[middle]
-                )
-            fair_value = (
-                dcf * 0.60
-                + secondary_median * 0.40
-            )
-
-        else:
-
-            fair_value = dcf
-
-    else:
-        sorted_values = sorted(valid_values)
-
-        middle = len(sorted_values) // 2
-
-        if len(sorted_values) % 2 == 0:
-
-            fair_value = (
-                sorted_values[middle - 1]
-                + sorted_values[middle]
-            ) / 2.0
-
-        else:
-
-            fair_value = sorted_values[middle]
-
-    # ------------------------------------------------------------
-    # UPSIDE
-    # ------------------------------------------------------------
-
-    upside = None
-
-    if price is not None and price > 0:
-
-        upside = (
-            fair_value / price
-            - 1.0
-        )
-
-    return ValuationSummary(
-        estimates=estimates,
-        fair_value=fair_value,
-        upside=upside,
-        low_value=low_value,
-        high_value=high_value,
-    )
+    
+    fair_value = sum(valid_values) / len(valid_values) if valid_values else None
+    upside = (fair_value / snapshot.price - 1) if fair_value else None
+    
+    return ValuationSummary(estimates, fair_value, upside)
