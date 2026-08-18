@@ -54,6 +54,7 @@ def make_snapshot(
 def make_prices(
     n=240,
 ):
+
     dates = pd.date_range(
         "2020-01-01",
         periods=n,
@@ -78,6 +79,7 @@ def make_prices(
 
 
 def test_analyze_snapshot_is_shared_decision_engine():
+
     prices = make_prices()["Close"]
 
     snapshot = make_snapshot(
@@ -103,11 +105,14 @@ def test_analyze_snapshot_is_shared_decision_engine():
 
 
 def test_backtest_uses_only_snapshot_for_each_historical_date():
+
     prices = make_prices(205)
+
+    close = prices["Close"]
 
     snapshots = {
         prices.index[i]: make_snapshot(
-            price=float(prices.iloc[i])
+            price=float(close.iloc[i])
         )
         for i in range(
             200,
@@ -144,7 +149,7 @@ def test_backtest_uses_only_snapshot_for_each_historical_date():
         )
 
     assert seen[0] == (
-        float(prices.iloc[200]),
+        float(close.iloc[200]),
         prices.index[200],
     )
 
@@ -164,17 +169,20 @@ def test_backtest_uses_only_snapshot_for_each_historical_date():
 
 
 def test_hold_keeps_existing_position():
+
     prices = make_prices(207)
+
+    close = prices["Close"]
 
     snapshots = {
         prices.index[200]: make_snapshot(
-            price=float(prices.iloc[200])
+            price=float(close.iloc[200])
         ),
         prices.index[201]: make_snapshot(
-            price=float(prices.iloc[201])
+            price=float(close.iloc[201])
         ),
         prices.index[202]: make_snapshot(
-            price=float(prices.iloc[202])
+            price=float(close.iloc[202])
         ),
     }
 
@@ -221,9 +229,11 @@ def test_hold_keeps_existing_position():
 def test_transaction_cost_reduces_result():
     prices = make_prices(202)
 
+    close = prices["Close"]
+
     snapshots = {
         prices.index[200]: make_snapshot(
-            price=float(prices.iloc[200])
+            price=float(close.iloc[200])
         )
     }
 
