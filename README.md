@@ -84,10 +84,7 @@ Current focus areas for improvement:
 
 ## Backtest Data Limitation
 
-Price history comes from yfinance. The optional snapshot file supplies the
-fundamentals used by the signal at each date, but yfinance does not provide
-reliable institutional-grade point-in-time fundamentals through this workflow.
-`snapshot_builder.py` therefore records the best available current snapshot for
+Price history comes from yfinance. `snapshot_builder.py` records the best available current snapshot for
 each requested date and repeats it. Results using `data/aapl_snapshots.json`
 are a pipeline demonstration, not a bias-free historical performance claim.
 
@@ -112,7 +109,7 @@ from the first price to the last price.
 | XOM | $355,384 | $358,296 | +255.38% | +258.30% | -$2,913 |
 | GOOGL | $246,265 | $248,410 | +146.27% | +148.41% | -$2,145 |
 
-**Simple result:** The full bot finished ahead on AAPL and MSFT, but behind
+**Result:** The full bot finished ahead on AAPL and MSFT, but behind
 buy and hold on JPM, XOM, and GOOGL. Across the five separate $100,000 tests,
 the full bot ended with a combined $1,252,436, compared with $1,238,099 for
 buy and hold. That is $14,337 more overall, or about 1.16% above the
