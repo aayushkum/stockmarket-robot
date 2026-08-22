@@ -95,5 +95,35 @@ def create_app(db_path: str) -> Flask:
             JSON array of analysis results.
         """
         return jsonify(db.latest_analyses())
+
+    @app.get('/portfolio')
+    def portfolio() -> str:
+        """Render current paper cash, positions, and unrealized P&L."""
+        from .config import Settings
+
+        state = db.load_portfolio(Settings(db_path=db_path))
+        analyses = {item["ticker"]: item for item in db.latest_analyses()}
+        rows = []
+        for ticker, position in state.positions.items():
+            price = analyses.get(ticker, {}).get("price", position.avg_cost)
+            rows.append({
+                "ticker": ticker,
+                "shares": position.shares,
+                "avg_cost": position.avg_cost,
+                "price": price,
+                "pnl": (price - position.avg_cost) * position.shares,
+            })
+        return render_template_string(
+            """<!doctype html><title>Paper Portfolio</title>
+            <h1>Paper Portfolio</h1><p>Cash: ${{ '%.2f'|format(cash) }}</p>
+            <table><tr><th>Ticker</th><th>Shares</th><th>Average cost</th>
+            <th>Price</th><th>Unrealized P&amp;L</th></tr>
+            {% for row in rows %}<tr><td>{{ row.ticker }}</td>
+            <td>{{ '%.4f'|format(row.shares) }}</td>
+            <td>${{ '%.2f'|format(row.avg_cost) }}</td>
+            <td>${{ '%.2f'|format(row.price) }}</td>
+            <td>${{ '%.2f'|format(row.pnl) }}</td></tr>{% endfor %}</table>""",
+            cash=state.cash, rows=rows,
+        )
     
     return app

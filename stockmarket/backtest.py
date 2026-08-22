@@ -1,425 +1,245 @@
-# Point-in-time backtesting for the stock analysis decision engine.
-
-from dataclasses import dataclass
+"""Historical backtest of moving average strategy."""
 import json
-import math
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
-
+from typing import Dict, Any, Optional
+import numpy as np
 import pandas as pd
-
-from .analyzer import analyze_snapshot
+import yfinance as yf
 from .data import Snapshot
+from .scoring import master_score, signal, momentum_score
+from .valuation import summarize
+from .analyzer import analyze_snapshot
+from .config import Settings
+from .paper import PaperPortfolio
 
 
-@dataclass(frozen=True)
-class BacktestConfig:
-    """Configuration for the portfolio simulation."""
-
-    initial_capital: float = 10_000.0
-    transaction_cost_bps: float = 10.0
-    min_history_days: int = 200
-
-
-def load_snapshot_history(
-    path: str | Path,
-) -> Dict[pd.Timestamp, Snapshot]:
-    """Load point-in-time snapshots from a JSON file.
-
-    Expected format:
-
-        {
-          "2023-01-03": {
-            "ticker": "AAPL",
-            "price": 125.07,
-            "eps": 6.11,
-            ...
-          },
-          "2023-02-01": {
-            ...
-          }
-        }
-    """
-    file_path = Path(path)
-
-    try:
-        payload = json.loads(
-            file_path.read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(
-            f"Failed to read snapshot history: {exc}"
-        ) from exc
-
-    if not isinstance(payload, dict):
-        raise ValueError(
-            "Snapshot history must be a JSON object keyed by date"
-        )
-
-    snapshots: Dict[pd.Timestamp, Snapshot] = {}
-
-    for date_text, values in payload.items():
-
-        if not isinstance(values, dict):
-            raise ValueError(
-                f"Snapshot for {date_text!r} must be an object"
-            )
-
-        try:
-            date = pd.Timestamp(date_text).normalize()
-        except Exception as exc:
-            raise ValueError(
-                f"Invalid snapshot date {date_text!r}"
-            ) from exc
-
-        try:
-            snapshots[date] = Snapshot(**values)
-        except TypeError as exc:
-            raise ValueError(
-                f"Invalid Snapshot fields for "
-                f"{date_text!r}: {exc}"
-            ) from exc
-
-    return snapshots
+def load_snapshot_history(path: str | Path) -> Dict[str, Snapshot]:
+    """Load date-keyed snapshots from a builder output JSON file."""
+    document = json.loads(Path(path).read_text(encoding="utf-8"))
+    raw_snapshots = document.get("snapshots", document)
+    return {
+        date_key: Snapshot(**snapshot)
+        for date_key, snapshot in raw_snapshots.items()
+        if isinstance(snapshot, dict) and "price" in snapshot
+    }
 
 
-def _validate_prices(prices: pd.DataFrame) -> pd.Series:
-    """Validate and normalize historical closing prices."""
-
-    if not isinstance(prices, pd.DataFrame):
-        raise ValueError(
-            "prices must be a DataFrame"
-        )
-
-    if "Close" not in prices.columns:
-        raise ValueError(
-            "prices must be a DataFrame containing "
-            "a 'Close' column"
-        )
-
-    close = pd.to_numeric(
-        prices["Close"],
-        errors="coerce",
-    ).dropna()
-
-    close = close[close > 0]
-
-    if close.empty:
-        raise ValueError(
-            "No valid closing prices available"
-        )
-
-    if not close.index.is_monotonic_increasing:
-        close = close.sort_index()
-
-    return close
-
-
-def _snapshot_for_date(
-    snapshots: Mapping,
-    date: pd.Timestamp,
-) -> Optional[Snapshot]:
-    """Find the snapshot exactly matching the analysis date."""
-
-    candidates = [
-        date,
-        date.normalize(),
-    ]
-
-    if hasattr(date, "date"):
-        candidates.append(date.date())
-
-    for candidate in candidates:
-        snapshot = snapshots.get(candidate)
-
-        if snapshot is not None:
-            return snapshot
-
-    return None
-
-
-def backtest_with_snapshots(
-    ticker: str,
-    prices: pd.DataFrame,
-    snapshots: Mapping,
-    config: Optional[BacktestConfig] = None,
+def full_system_backtest(
+    ticker: str, snapshots: str | Path, period: str = "5y",
+    settings: Optional[Settings] = None,
 ) -> Dict[str, Any]:
-    """Backtest the actual robot using point-in-time snapshots.
+    """Backtest valuation, scoring, signals, and paper execution together.
 
-    The decision on day *t* uses:
-
-      1. fundamentals from the snapshot dated *t*;
-      2. prices through *t* only.
-
-    A BUY enters a long position.
-
-    A SELL exits it.
-
-    HOLD preserves the previous position.
-
-    Any trade is executed at the close of *t*, and the resulting position
-    earns the return from *t* to the next trading day.
-
-    Missing snapshots are skipped rather than replaced with current data.
+    Decisions use the latest snapshot and price history available before the
+    next trading day's close. Orders are then executed at that next close,
+    avoiding same-day lookahead. This single-ticker mode invests available cash
+    on BUY and exits the position on SELL.
     """
+    settings = settings or Settings()
+    snapshot_history = load_snapshot_history(snapshots)
+    if not snapshot_history:
+        raise ValueError("Snapshot history is empty")
+    try:
+        df = yf.Ticker(ticker).history(period=period, auto_adjust=True)
+    except Exception as error:
+        raise ValueError(f"Failed to fetch backtest data for {ticker}: {error}") from error
+    if df.empty or "Close" not in df:
+        raise ValueError(f"No usable price history available for {ticker}")
 
-    config = config or BacktestConfig()
+    close = df["Close"].dropna()
+    dated_snapshots = sorted(
+        (pd.Timestamp(key).tz_localize(None), value)
+        for key, value in snapshot_history.items()
+    )
+    portfolio = PaperPortfolio(settings)
+    equity = []
+    trades = 0
 
-    if config.initial_capital <= 0:
-        raise ValueError(
-            "initial_capital must be positive"
-        )
-
-    if config.transaction_cost_bps < 0:
-        raise ValueError(
-            "transaction_cost_bps cannot be negative"
-        )
-
-    if config.min_history_days < 1:
-        raise ValueError(
-            "min_history_days must be positive"
-        )
-
-    close = _validate_prices(prices)
-
-    if len(close) < config.min_history_days + 1:
-        raise ValueError(
-            f"Insufficient data for backtest "
-            f"(need at least "
-            f"{config.min_history_days + 1} "
-            f"valid prices, got {len(close)})"
-        )
-
-    equity = float(config.initial_capital)
-
-    # 0 = cash
-    # 1 = fully invested long
-    position = 0
-
-    equity_curve = []
-    trades = []
-
-    skipped = 0
-
-    for i in range(
-        config.min_history_days,
-        len(close) - 1,
-    ):
-
-        date = close.index[i]
-        next_date = close.index[i + 1]
-
-        snapshot = _snapshot_for_date(
-            snapshots,
-            date,
-        )
-
-        # Never substitute current fundamentals.
-        if snapshot is None:
-            skipped += 1
-
-            equity_curve.append(
-                (date, equity, position)
-            )
-
+    for index in range(1, len(close)):
+        decision_date = pd.Timestamp(close.index[index - 1]).tz_localize(None)
+        available = [item for item in dated_snapshots if item[0] <= decision_date]
+        if not available:
+            equity.append(portfolio.cash)
             continue
-
-        if snapshot.ticker.upper() != ticker.upper():
-            raise ValueError(
-                f"Snapshot ticker "
-                f"{snapshot.ticker!r} "
-                f"does not match "
-                f"{ticker!r}"
-            )
-
-        if snapshot.price <= 0:
-            skipped += 1
-
-            equity_curve.append(
-                (date, equity, position)
-            )
-
-            continue
-
-        # IMPORTANT:
-        #
-        # The historical price series ends at the current
-        # backtest date. Therefore the decision cannot see
-        # tomorrow's price.
-        history = close.iloc[: i + 1]
-
-        # This is the exact same decision engine used by
-        # live analysis.
-        analysis = analyze_snapshot(
-            snapshot,
-            history,
+        decision_price = float(close.iloc[index - 1])
+        execution_price = float(close.iloc[index])
+        dated_snapshot = available[-1][1]
+        decision_snapshot = Snapshot(**{
+            **dated_snapshot.to_dict(), "price": decision_price
+        })
+        history = close.iloc[:index]
+        result = analyze_snapshot(
+            ticker, decision_snapshot, pd.DataFrame({"Close": history}), settings
         )
+        if result["signal"] == "BUY" and ticker not in portfolio.positions:
+            if portfolio.buy(ticker, execution_price, portfolio.cash):
+                trades += 1
+        elif result["signal"] == "SELL" and ticker in portfolio.positions:
+            portfolio.sell(ticker, execution_price)
+            trades += 1
+        equity.append(portfolio.equity({ticker: execution_price}))
 
-        decision = analysis["signal"]
-
-        # HOLD means maintain the existing position.
-        target_position = position
-
-        if decision == "BUY":
-            target_position = 1
-
-        elif decision == "SELL":
-            target_position = 0
-
-        # Execute trade at today's close.
-        if target_position != position:
-
-            cost = (
-                equity
-                * (config.transaction_cost_bps / 10_000)
-            )
-
-            equity -= cost
-
-            trades.append(
-                {
-                    "date": date.isoformat(),
-                    "signal": decision,
-                    "position": target_position,
-                    "transaction_cost": float(cost),
-                }
-            )
-
-            position = target_position
-
-        # The new position captures only the NEXT
-        # day's return.
-        daily_return = float(
-            close.iloc[i + 1]
-            / close.iloc[i]
-            - 1
-        )
-
-        if position:
-            equity *= 1 + daily_return
-
-        equity_curve.append(
-            (
-                next_date,
-                equity,
-                position,
-            )
-        )
-
-    if not equity_curve:
-        raise ValueError(
-            "No backtest observations were produced"
-        )
-
-    curve = pd.Series(
-        [row[1] for row in equity_curve],
-        index=pd.DatetimeIndex(
-            [row[0] for row in equity_curve]
-        ),
-        dtype=float,
-    )
-
-    returns = curve.pct_change().fillna(0.0)
-
-    # Buy-and-hold benchmark starting on the same
-    # first day that the strategy starts recording returns.
-    benchmark = (
-        config.initial_capital
-        * (
-            close
-            / close.iloc[config.min_history_days]
-        )
-    )
-
-    benchmark = benchmark.loc[
-        curve.index
-    ].astype(float)
-
-    years = max(
-        (
-            curve.index[-1]
-            - curve.index[0]
-        ).days / 365.25,
-        1 / 365.25,
-    )
-
-    strategy_return = (
-        curve.iloc[-1]
-        / config.initial_capital
-        - 1
-    )
-
-    benchmark_return = (
-        benchmark.iloc[-1]
-        / benchmark.iloc[0]
-        - 1
-    )
-
-    cagr = (
-        curve.iloc[-1]
-        / config.initial_capital
-    ) ** (1 / years) - 1
-
-    drawdown = (
-        curve
-        / curve.cummax()
-        - 1
-    )
-
-    volatility = (
-        returns.std(ddof=1)
-        * math.sqrt(252)
-    )
-
-    sharpe = (
-        returns.mean()
-        * 252
-        / volatility
-        if volatility > 0
-        else 0.0
-    )
-
+    equity_series = pd.Series(equity, index=close.index[1:])
+    initial = settings.starting_cash
+    final = float(equity_series.iloc[-1]) if not equity_series.empty else initial
+    years = max((close.index[-1] - close.index[0]).days / 365.25, 1 / 365.25)
+    daily_returns = equity_series.pct_change().fillna(0)
+    volatility = daily_returns.std() * np.sqrt(252)
     return {
         "ticker": ticker,
-        "start_date": curve.index[0].isoformat(),
-        "end_date": curve.index[-1].isoformat(),
+        "period": period,
+        "strategy": "full_system",
+        "starting_cash": initial,
+        "ending_equity": final,
+        "strategy_return": final / initial - 1,
+        "benchmark_return": float(close.iloc[-1] / close.iloc[0] - 1),
+        "cagr": float((final / initial) ** (1 / years) - 1),
+        "max_drawdown": float((equity_series / equity_series.cummax() - 1).min()) if not equity_series.empty else 0.0,
+        "sharpe": float(daily_returns.mean() * 252 / volatility) if volatility > 0 else 0.0,
+        "observations": int(len(close)),
+        "trade_count": trades,
+    }
 
-        "initial_capital": float(
-            config.initial_capital
-        ),
 
-        "final_equity": float(
-            curve.iloc[-1]
-        ),
+def full_system_universe_backtest(
+    tickers: list[str], snapshot_dir: str | Path, period: str = "5y",
+    settings: Optional[Settings] = None,
+) -> Dict[str, Any]:
+    """Run the full-system backtest for every ticker with dated snapshots.
 
-        "strategy_return": float(
-            strategy_return
-        ),
+    Each ticker must have ``<ticker>.json`` in ``snapshot_dir``. Missing files
+    are reported and skipped rather than replaced with current fundamentals.
+    """
+    results: Dict[str, Any] = {}
+    missing: list[str] = []
+    directory = Path(snapshot_dir)
+    for ticker in tickers:
+        snapshot_path = directory / f"{ticker.lower()}_snapshots.json"
+        if not snapshot_path.exists():
+            missing.append(ticker)
+            continue
+        results[ticker] = full_system_backtest(
+            ticker, snapshot_path, period, settings
+        )
 
-        "benchmark_return": float(
-            benchmark_return
-        ),
+    valid = list(results.values())
+    return {
+        "period": period,
+        "strategy": "full_system",
+        "requested_tickers": len(tickers),
+        "completed_tickers": len(valid),
+        "missing_snapshot_tickers": missing,
+        "results": results,
+        "average_return": float(np.mean([r["strategy_return"] for r in valid])) if valid else None,
+        "average_benchmark_return": float(np.mean([r["benchmark_return"] for r in valid])) if valid else None,
+        "average_cagr": float(np.mean([r["cagr"] for r in valid])) if valid else None,
+        "average_sharpe": float(np.mean([r["sharpe"] for r in valid])) if valid else None,
+    }
 
+
+def moving_average_backtest(
+    ticker: str, period: str = "5y", snapshots: Optional[str] = None,
+    fast_window: int = 30, slow_window: int = 200
+) -> Dict[str, Any]:
+    """Backtest a long-only moving average crossover strategy.
+    
+    Default strategy:
+    - BUY: fast moving average > slow moving average
+    - SELL: fast moving average < slow moving average
+
+    The default 30/200 windows reduce the lag observed in the previous
+    50/200 baseline while retaining a long-term trend filter.
+    
+    Args:
+        ticker: Stock ticker to backtest.
+        period: Historical period (e.g., '5y', '1y', 'max').
+        snapshots: Optional point-in-time snapshot JSON file.
+        fast_window: Number of days for the fast moving average.
+        slow_window: Number of days for the slow moving average.
+        
+    Returns:
+        Dictionary with backtest results:
+        - strategy_return: Total return of strategy
+        - benchmark_return: Total return of buy-and-hold
+        - cagr: Compound annual growth rate
+        - max_drawdown: Maximum drawdown
+        - sharpe: Sharpe ratio
+        - observations: Number of trading days
+        - trade_count: Number of position transitions
+        
+    Raises:
+        ValueError: If no historical data available.
+    """
+    try:
+        df = yf.Ticker(ticker).history(period=period, auto_adjust=True)
+    except Exception as e:
+        raise ValueError(f"Failed to fetch backtest data for {ticker}: {e}")
+    
+    if df.empty:
+        raise ValueError(f"No history available for {ticker} in period {period}")
+    
+    close = df["Close"].dropna()
+    
+    if fast_window <= 0 or slow_window <= fast_window:
+        raise ValueError("Moving-average windows must be positive and slow > fast")
+    if len(close) < slow_window:
+        raise ValueError(
+            f"Insufficient data for backtest (need {slow_window}+ days, "
+            f"got {len(close)})"
+        )
+    
+    # Calculate moving averages
+    fast_average = close.rolling(fast_window).mean()
+    slow_average = close.rolling(slow_window).mean()
+    
+    # Use point-in-time fundamental signals when supplied; otherwise use MA.
+    if snapshots:
+        snapshot_history = load_snapshot_history(snapshots)
+        dated_snapshots = sorted(
+            (pd.Timestamp(key), value) for key, value in snapshot_history.items()
+        )
+        positions = []
+        for index in range(len(close)):
+            current_date = pd.Timestamp(close.index[index]).tz_localize(None)
+            available = [item for item in dated_snapshots if item[0] <= current_date]
+            if not available:
+                positions.append(0)
+                continue
+            snapshot = available[-1][1]
+            momentum = momentum_score(close.iloc[:index + 1])
+            score, _ = master_score(snapshot, summarize(snapshot), momentum)
+            positions.append(int(signal(score) == "BUY"))
+        strategy_signal = pd.Series(positions, index=close.index).shift(1).fillna(0)
+    else:
+        strategy_signal = (fast_average > slow_average).astype(int).shift(1).fillna(0)
+    
+    # Calculate daily returns
+    daily_returns = close.pct_change().fillna(0)
+    
+    # Strategy returns (only when signal is 1)
+    strategy_returns = strategy_signal * daily_returns
+    
+    # Cumulative returns
+    strategy_equity = (1 + strategy_returns).cumprod()
+    benchmark_equity = (1 + daily_returns).cumprod()
+    
+    # Performance metrics
+    years = max((close.index[-1] - close.index[0]).days / 365.25, 1 / 365.25)
+    cagr = strategy_equity.iloc[-1] ** (1 / years) - 1
+    max_drawdown = (strategy_equity / strategy_equity.cummax() - 1).min()
+    volatility = strategy_returns.std() * np.sqrt(252)
+    sharpe = (strategy_returns.mean() * 252 / volatility) if volatility > 0 else 0
+    
+    return {
+        "ticker": ticker,
+        "period": period,
+        "fast_window": fast_window,
+        "slow_window": slow_window,
+        "strategy_return": float(strategy_equity.iloc[-1] - 1),
+        "benchmark_return": float(benchmark_equity.iloc[-1] - 1),
         "cagr": float(cagr),
-
-        "max_drawdown": float(
-            drawdown.min()
-        ),
-
+        "max_drawdown": float(max_drawdown),
         "sharpe": float(sharpe),
-
-        "observations": int(
-            len(curve)
-        ),
-
-        "trades": trades,
-
-        "trade_count": len(trades),
-
-        "skipped_observations": skipped,
-
-        "equity_curve": {
-            timestamp.isoformat(): float(value)
-            for timestamp, value in curve.items()
-        },
+        "observations": int(len(close)),
+        "trade_count": int(strategy_signal.diff().abs().fillna(0).sum()),
     }

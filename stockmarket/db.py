@@ -4,6 +4,9 @@ import sqlite3
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from .config import Settings
+from .paper import PaperPortfolio, Position
+
 
 class Database:
     """SQLite database for storing analyses and trades.
@@ -102,6 +105,48 @@ class Database:
             (ticker,)
         ).fetchone()
         return json.loads(row[0]) if row else None
+
+    def save_portfolio(self, cash: float, positions: Dict[str, Position]) -> None:
+        """Persist the current paper portfolio state."""
+        from datetime import datetime, timezone
+
+        self.conn.execute(
+            "INSERT OR REPLACE INTO portfolio VALUES (1, ?, ?)",
+            (cash, datetime.now(timezone.utc).isoformat()),
+        )
+        self.conn.execute("DELETE FROM positions")
+        self.conn.executemany(
+            "INSERT INTO positions (ticker, shares, avg_cost) VALUES (?, ?, ?)",
+            [(ticker, position.shares, position.avg_cost)
+             for ticker, position in positions.items()],
+        )
+        self.conn.commit()
+
+    def save_trade(self, timestamp: str, ticker: str, side: str,
+                   shares: float, price: float, value: float) -> None:
+        """Record one simulated trade execution."""
+        self.conn.execute(
+            "INSERT INTO trades (timestamp, ticker, side, shares, price, value) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (timestamp, ticker, side, shares, price, value),
+        )
+        self.conn.commit()
+
+    def load_portfolio(self, settings: Settings) -> PaperPortfolio:
+        """Load paper portfolio state or initialize a new portfolio."""
+        portfolio = PaperPortfolio(settings)
+        row = self.conn.execute(
+            "SELECT cash FROM portfolio WHERE id = 1"
+        ).fetchone()
+        if row:
+            portfolio.cash = float(row[0])
+            rows = self.conn.execute(
+                "SELECT ticker, shares, avg_cost FROM positions"
+            ).fetchall()
+            portfolio.positions = {
+                row[0]: Position(float(row[1]), float(row[2])) for row in rows
+            }
+        return portfolio
     
     def close(self) -> None:
         """Close database connection."""

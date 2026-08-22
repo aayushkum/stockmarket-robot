@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pandas as pd
 from stockmarket.data import Snapshot, num, fetch_snapshot, price_history
+from stockmarket.config import Settings
 
 
 class TestNum:
@@ -178,6 +179,21 @@ def test_fetch_snapshot_success(mock_ticker):
     assert snapshot.ticker == "AAPL"
     assert snapshot.price == 150.0
     assert snapshot.sector == "Technology"
+
+
+@patch('stockmarket.data.yf.Ticker')
+def test_fetch_snapshot_uses_fresh_cache(mock_ticker, tmp_path):
+    """Test that a fresh snapshot cache avoids another yfinance request."""
+    mock_ticker.return_value.info = {"currentPrice": 150.0}
+    mock_ticker.return_value.fast_info = {}
+    settings = Settings(db_path=str(tmp_path / "robot.db"), cache_hours=6)
+
+    first = fetch_snapshot("AAPL", settings)
+    mock_ticker.reset_mock()
+    second = fetch_snapshot("AAPL", settings)
+
+    assert second == first
+    mock_ticker.assert_not_called()
 
 
 @patch('stockmarket.data.yf.Ticker')

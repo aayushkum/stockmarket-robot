@@ -119,18 +119,22 @@ def master_score(s, v, momentum: float = 50) -> tuple:
     master = sum(components[k] * weights[k] for k in weights)
     return master, components
 
-def signal(score: float) -> str:
+def signal(score: float, buy_threshold: float = 70.0,
+           sell_threshold: float = 40.0) -> str:
     """Convert master score to trading signal.
     
     Args:
         score: Master score 0-100.
+        buy_threshold: Minimum score for a BUY signal.
+        sell_threshold: Maximum score for a SELL signal.
         
     Returns:
-        'BUY' if score >= 70, 'SELL' if score <= 40, else 'HOLD'.
+        'BUY' if score >= buy_threshold, 'SELL' if score <= sell_threshold,
+        else 'HOLD'.
     """
-    if score >= 70:
+    if score >= buy_threshold:
         return "BUY"
-    elif score <= 40:
+    elif score <= sell_threshold:
         return "SELL"
     else:
         return "HOLD"

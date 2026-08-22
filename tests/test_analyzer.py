@@ -1,7 +1,9 @@
 """Tests for the analyzer module."""
 import pytest
+import pandas as pd
 from unittest.mock import Mock, patch
 from stockmarket.analyzer import analyze
+from stockmarket.config import Settings
 
 
 def create_mock_snapshot():
@@ -100,3 +102,18 @@ def test_analyze_includes_components(mock_price_history, mock_fetch_snapshot):
     # Verify they're all in valid range
     for score in components.values():
         assert 0 <= score <= 100
+
+
+@patch('stockmarket.analyzer.fetch_snapshot')
+@patch('stockmarket.analyzer.price_history')
+def test_analyze_uses_configured_signal_thresholds(mock_price_history,
+                                                   mock_fetch_snapshot):
+    """Test that configured thresholds control the generated signal."""
+    mock_fetch_snapshot.return_value = create_mock_snapshot()
+    mock_price_history.return_value = pd.DataFrame(
+        {"Close": pd.Series([100.0] * 250)}
+    )
+
+    result = analyze("TEST", Settings(min_score_to_buy=101.0, sell_score=99.0))
+
+    assert result["signal"] == "SELL"

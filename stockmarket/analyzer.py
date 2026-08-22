@@ -1,59 +1,24 @@
 """Main analysis pipeline combining all valuation and scoring models."""
-
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Dict, Any
 
-import pandas as pd
+from .data import fetch_snapshot, price_history
+from .valuation import summarize
+from .scoring import master_score, signal, momentum_score
+from .config import Settings
 
-from .data import Snapshot, fetch_snapshot, price_history
-from .scoring import master_score, momentum_score, signal
-from .valuation import ValuationSummary, summarize
 
-
-def analyze_snapshot(
-    snapshot: Snapshot,
-    history: pd.Series,
-    analyzed_at: Optional[datetime] = None,
-) -> Dict[str, Any]:
-
-    if snapshot is None:
-        raise TypeError("snapshot cannot be None")
-
-    if not isinstance(history, pd.Series):
-        raise TypeError("history must be a pandas Series")
-
-    history = pd.to_numeric(
-        history,
-        errors="coerce",
-    ).dropna()
-
-    if history.empty:
-        raise ValueError(
-            "history contains no valid prices"
-        )
-
-    valuation: ValuationSummary = summarize(
-        snapshot
-    )
-
-    momentum = momentum_score(
-        history
-    )
-
-    score, components = master_score(
-        snapshot,
-        valuation,
-        momentum,
-    )
-
-    timestamp = (
-        analyzed_at
-        or datetime.now(timezone.utc)
-    )
+def analyze_snapshot(ticker: str, snapshot: Any, history: Any,
+                     settings: Settings | None = None) -> Dict[str, Any]:
+    """Analyze already-fetched data using configured signal thresholds."""
+    settings = settings or Settings()
+    valuation = summarize(snapshot)
+    momentum = momentum_score(history["Close"])
+    score, components = master_score(snapshot, valuation, momentum)
 
     return {
-        "ticker": snapshot.ticker,
-        "analyzed_at": timestamp.isoformat(),
+        "ticker": ticker,
+        "analyzed_at": datetime.now(timezone.utc).isoformat(),
         "price": snapshot.price,
         "sector": snapshot.sector,
         "fair_value": valuation.fair_value,
@@ -61,29 +26,38 @@ def analyze_snapshot(
         "valuation": valuation.to_dict(),
         "master_score": score,
         "components": components,
-        "signal": signal(score),
+        "signal": signal(score, settings.min_score_to_buy, settings.sell_score),
         "snapshot": snapshot.to_dict(),
     }
 
 
-def analyze(
-    ticker: str,
-) -> Dict[str, Any]:
-    """Perform a live analysis using the latest available data."""
-
-    snapshot = fetch_snapshot(
-        ticker
-    )
-
-    history = price_history(
-        ticker,
-        "1y",
-    )
-
-    result = analyze_snapshot(
-        snapshot,
-        history["Close"],
-    )
-    result["ticker"] = ticker
-
-    return result
+def analyze(ticker: str, settings: Settings | None = None) -> Dict[str, Any]:
+    """Perform complete analysis on a stock ticker.
+    
+    Combines current financial data, valuation models, and price momentum
+    to produce a comprehensive investment signal.
+    
+    Args:
+        ticker: Stock ticker symbol.
+        
+    Returns:
+        Dictionary containing:
+        - ticker: Stock symbol
+        - analyzed_at: ISO timestamp
+        - price: Current price
+        - sector: Business sector
+        - fair_value: Estimated fair value
+        - upside: Potential upside percentage
+        - valuation: Detailed valuation summary
+        - master_score: Overall score 0-100
+        - components: Individual component scores
+        - signal: BUY/HOLD/SELL
+        - snapshot: Complete financial snapshot
+        
+    Raises:
+        ValueError: If stock data unavailable.
+    """
+    settings = settings or Settings()
+    snapshot = fetch_snapshot(ticker, settings)
+    history = price_history(ticker, "1y", settings)
+    return analyze_snapshot(ticker, snapshot, history, settings)

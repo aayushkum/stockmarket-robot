@@ -19,6 +19,9 @@ class Settings:
         db_path: Path to SQLite database file.
         dashboard_host: Flask dashboard host address.
         dashboard_port: Flask dashboard port number.
+        request_delay_seconds: Minimum delay between yfinance requests.
+        max_retries: Number of retries after a failed yfinance request.
+        retry_backoff_seconds: Initial delay before retrying a request.
     """
     starting_cash: float = 100_000.0
     risk_profile: int = 5
@@ -29,6 +32,9 @@ class Settings:
     db_path: str = "data/stockmarket.db"
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 5000
+    request_delay_seconds: float = 1.5
+    max_retries: int = 2
+    retry_backoff_seconds: float = 5.0
 
     @classmethod
     def from_env(cls) -> 'Settings':
@@ -44,6 +50,9 @@ class Settings:
         - DB_PATH: Database path (default: data/stockmarket.db)
         - DASHBOARD_HOST: Flask host (default: 127.0.0.1)
         - DASHBOARD_PORT: Flask port (default: 5000)
+        - YFINANCE_REQUEST_DELAY: Minimum request interval (default: 1.5)
+        - YFINANCE_MAX_RETRIES: Retry count (default: 2)
+        - YFINANCE_RETRY_BACKOFF: Initial retry delay (default: 5)
         
         Returns:
             Settings instance with values from environment or defaults.
@@ -58,4 +67,9 @@ class Settings:
             db_path=os.getenv("DB_PATH", cls.db_path),
             dashboard_host=os.getenv("DASHBOARD_HOST", cls.dashboard_host),
             dashboard_port=int(os.getenv("DASHBOARD_PORT", cls.dashboard_port)),
+            request_delay_seconds=float(os.getenv(
+                "YFINANCE_REQUEST_DELAY", cls.request_delay_seconds)),
+            max_retries=int(os.getenv("YFINANCE_MAX_RETRIES", cls.max_retries)),
+            retry_backoff_seconds=float(os.getenv(
+                "YFINANCE_RETRY_BACKOFF", cls.retry_backoff_seconds)),
         )
