@@ -127,30 +127,6 @@ single-stock tests, not a diversified portfolio result.
 | XOM | 28.91% | -20.51% | 1.09 | 1 |
 | GOOGL | 19.78% | -44.32% | 0.72 | 1 |
 
-
-### Full-System AAPL Run
-
-The separate full-system mode uses the actual valuation, scoring, signal, and
-paper-portfolio execution path. On the refreshed AAPL run, $100,000 ended at
-$249,186, a +149.19% return, compared with +111.85% for buy and hold. It had
-one recorded position transition, a 20.06% CAGR, a 0.94 Sharpe ratio, and a
--33.36% maximum drawdown.
-
-This is not a fair proof of the full strategy yet: the available AAPL fixture
-repeats the current fundamental snapshot across historical dates. The result
-shows that the complete pipeline executes, but reliable strategy evaluation
-requires genuinely point-in-time fundamentals. An all-S&P 500 full-system
-report is intentionally blocked until a dated snapshot file exists for each
-ticker; it will not substitute today's fundamentals for historical data.
-
-```powershell
-python -m stockmarket.main backtest --ticker AAPL --period 5y \
-        --snapshots data/aapl_snapshots.json --full-system
-
-# Run all available S&P 500 full-system reports once snapshot files exist
-python -m stockmarket.main backtest --full-system --snapshot-dir data/snapshots
-```
-
 ## Timeline
 #### July 2026: Research and Planning
 - Sparked by the $15 billion loss from Jane Street Situational Awareness, began researching the architecture of stock trading bots.
